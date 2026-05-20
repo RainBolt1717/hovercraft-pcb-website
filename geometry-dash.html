@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Geometry Dash</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #1a1a2e; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; font-family: 'Arial Black', Arial, sans-serif; overflow: hidden; }
+  #gameContainer { position: relative; }
+  canvas { display: block; border: 2px solid #444; }
+  #ui { position: absolute; top: 0; left: 0; width: 100%; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; pointer-events: none; }
+  #attempts { color: #fff; font-size: 13px; opacity: 0.7; }
+  #percent { color: #fff; font-size: 13px; opacity: 0.7; }
+  #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(0,0,0,0.75); }
+  #overlay h1 { color: #fff; font-size: 42px; text-shadow: 0 0 20px #00cfff; margin-bottom: 8px; letter-spacing: 2px; }
+  #overlay .subtitle { color: #aaa; font-size: 14px; margin-bottom: 30px; }
+  #overlay .btn { background: linear-gradient(135deg, #00cfff, #0070ff); color: #fff; border: none; padding: 14px 40px; font-size: 18px; font-family: inherit; border-radius: 6px; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; box-shadow: 0 4px 20px rgba(0,207,255,0.4); transition: transform 0.1s, box-shadow 0.1s; }
+  #overlay .btn:hover { transform: scale(1.05); box-shadow: 0 6px 28px rgba(0,207,255,0.6); }
+  #deathMsg { color: #ff4444; font-size: 22px; margin-bottom: 16px; display: none; }
+  #completeMsg { color: #ffd700; font-size: 22px; margin-bottom: 16px; display: none; }
+  #bestPercent { color: #aaa; font-size: 13px; margin-top: 10px; }
+</style>
+</head>
+<body>
+<div id="gameContainer">
+  <canvas id="c"></canvas>
+  <div id="ui">
+    <span id="attempts">Attempt 1</span>
+    <span id="percent">0%</span>
+  </div>
+  <div id="overlay">
+    <h1>Geometry Dash</h1>
+    <div class="subtitle">Press SPACE or tap to jump</div>
+    <div id="deathMsg">You Died!</div>
+    <div id="completeMsg">Level Complete!</div>
+    <button class="btn" id="startBtn">Play</button>
+    <div id="bestPercent"></div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const W = 800, H = 400;
+canvas.width = W; canvas.height = H;
+
+// ── constants ──────────────────────────────────────────────
+const GROUND_Y = H - 60;
+const TILE = 40;
+const GRAVITY = 0.65;
+const JUMP_FORCE = -13.5;
+const SPEED = 6;
+
+// ── colors ─────────────────────────────────────────────────
+const BG_TOP = '#1a1a3e';
+const BG_BOT = '#0d0d22';
+const GROUND_COLOR = '#2a2a5a';
+const GROUND_LINE = '#3a3a8a';
+const PLAYER_COLOR = '#00cfff';
+const PLAYER_INNER = '#0077cc';
+const SPIKE_COLOR = '#ff4444';
+const BLOCK_COLOR = '#4444cc';
+const BLOCK_DETAIL = '#5555ee';
+const ORB_COLOR = '#ffdd00';
+const PORTAL_COLOR = '#aa00ff';
+
+// ── level data ─────────────────────────────────────────────
+// Each entry: { type, x, y }
+// types: 'block', 'spike', 'orb', 'portal_ship', 'portal_cube'
+// x in tile units from start, y = tile rows from ground (0=on ground, positive=above)
+function buildLevel() {
+  const items = [];
+  let x = 18;
+  function block(tx, ty=0) { items.push({ type:'block', x:tx*TILE, y: GROUND_Y - TILE - ty*TILE }); }
+  function spike(tx, ty=0) { items.push({ type:'spike', x:tx*TILE, y: GROUND_Y - ty*TILE }); }
+  function orb(tx, ty=2) { items.push({ type:'orb', x:tx*TILE, y: GROUND_Y - ty*TILE - TILE/2 }); }
+
+  // section 1: simple spikes
+  spike(20); spike(23); spike(24);
+  // stair blocks
+  block(27); block(28,1); block(29,2);
+  spike(31);
+  // double spike
+  spike(34); spike(35);
+  // platform with orb
+  block(38); block(39); block(40); orb(39, 3);
+  spike(43); spike(44); spike(45);
+  // tall block
+  block(48); block(48,1); block(49); block(49,1);
+  spike(52); spike(53);
+  // orb over gap
+  orb(56, 2);
+  spike(57); spike(58);
+  // stairs up
+  block(61); block(62,1); block(63,2); block(64,3);
+  spike(66);
+  // triple spike
+  spike(69); spike(70); spike(71);
+  // big platform
+  block(74); block(75); block(76); block(77); block(78);
+  spike(80); spike(81);
+  orb(84, 2);
+  spike(85); spike(86); spike(87);
+  block(90); block(91,1); block(92,2);
+  spike(94); spike(95);
+  // section 2: faster rhythm
+  spike(98); spike(100); spike(101);
+  block(104); block(105); spike(107);
+  orb(109, 2); spike(110); spike(111);
+  block(114); block(114,1); block(115); block(115,1); block(116); block(116,1);
+  spike(119); spike(120); spike(121);
+  orb(124, 2); orb(126, 2);
+  spike(127); spike(128);
+  block(131); block(132); block(133,1); block(134,2);
+  spike(136); spike(137); spike(138);
+  block(141); block(141,1); block(141,2);
+  spike(144); spike(145);
+  orb(148, 2); spike(149);
+  // section 3: dense
+  spike(152); spike(153); spike(154);
+  block(157); block(158,1); block(159,2); block(160,3);
+  spike(162); spike(163);
+  orb(166, 3); orb(168, 3);
+  spike(169); spike(170); spike(171);
+  block(174); block(175); block(176); block(177);
+  block(174,1); block(175,1);
+  spike(180); spike(181); spike(182); spike(183);
+  orb(186, 2);
+  spike(187); spike(188);
+  block(191); block(192,1); block(193,2); block(194,3);
+  spike(196); spike(197); spike(198);
+  // final stretch
+  spike(202); spike(203);
+  block(206); block(207); block(208); block(207,1); block(208,1);
+  spike(211); spike(212); spike(213);
+  orb(216, 2); orb(218, 2);
+  spike(219); spike(220); spike(221);
+  block(224); block(225); block(226,1); block(227,2);
+  spike(230); spike(231);
+  spike(234); spike(235); spike(236);
+  block(239); block(240); block(241); block(240,1); block(241,1); block(241,2);
+  spike(244); spike(245);
+  orb(248, 2);
+  spike(249); spike(250); spike(251);
+
+  return items;
+}
+
+const LEVEL_LENGTH = 260 * TILE;
+
+// ── state ──────────────────────────────────────────────────
+let player, camera, particles, attempts, bestPercent;
+let gameState = 'menu'; // menu | playing | dead | win
+let levelItems;
+let bgOffset = 0;
+
+function initGame() {
+  player = {
+    x: 120, y: GROUND_Y - TILE,
+    vy: 0,
+    onGround: false,
+    rotation: 0,
+    dead: false,
+    ship: false,
+    trail: []
+  };
+  camera = { x: 0 };
+  particles = [];
+  levelItems = buildLevel();
+}
+
+function resetRun() {
+  initGame();
+}
+
+// ── input ──────────────────────────────────────────────────
+let jumpQueued = false;
+let jumpHeld = false;
+
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') {
+    e.preventDefault();
+    jumpQueued = true;
+    jumpHeld = true;
+    if (gameState === 'menu' || gameState === 'dead' || gameState === 'win') tryStart();
+  }
+});
+document.addEventListener('keyup', e => {
+  if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') jumpHeld = false;
+});
+canvas.addEventListener('pointerdown', e => {
+  jumpQueued = true;
+  jumpHeld = true;
+  if (gameState === 'menu' || gameState === 'dead' || gameState === 'win') tryStart();
+});
+canvas.addEventListener('pointerup', () => { jumpHeld = false; });
+document.getElementById('startBtn').addEventListener('click', tryStart);
+
+function tryStart() {
+  if (gameState !== 'playing') {
+    if (gameState === 'menu') attempts = 0;
+    if (gameState !== 'dead' && gameState !== 'win') attempts = 0;
+    attempts++;
+    resetRun();
+    gameState = 'playing';
+    document.getElementById('overlay').style.display = 'none';
+    document.getElementById('deathMsg').style.display = 'none';
+    document.getElementById('completeMsg').style.display = 'none';
+  }
+}
+
+// ── physics helpers ────────────────────────────────────────
+function playerRect() {
+  const pad = 3;
+  return { x: player.x + pad, y: player.y + pad, w: TILE - pad*2, h: TILE - pad*2 };
+}
+
+function rectsOverlap(a, b) {
+  return a.x < b.x + b.w && a.x + a.w > b.x &&
+         a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function blockRect(item) {
+  return { x: item.x - camera.x, y: item.y, w: TILE, h: TILE };
+}
+
+function spikeTriangle(item) {
+  const bx = item.x - camera.x;
+  const by = item.y;
+  return [
+    { x: bx, y: by + TILE },
+    { x: bx + TILE/2, y: by },
+    { x: bx + TILE, y: by + TILE }
+  ];
+}
+
+function pointInTriangle(px, py, t) {
+  const [a, b, c] = t;
+  const d1 = sign(px,py,a,b), d2 = sign(px,py,b,c), d3 = sign(px,py,c,a);
+  const has_neg = (d1<0)||(d2<0)||(d3<0);
+  const has_pos = (d1>0)||(d2>0)||(d3>0);
+  return !(has_neg && has_pos);
+}
+function sign(px,py,ax,ay,bx,by) { return (px-bx)*(ay-by)-(ax-bx)*(py-by); }
+
+function spikeCollide(item) {
+  const pr = playerRect();
+  const corners = [
+    [pr.x, pr.y], [pr.x+pr.w, pr.y],
+    [pr.x, pr.y+pr.h], [pr.x+pr.w, pr.y+pr.h]
+  ];
+  const tri = spikeTriangle(item);
+  const shrinkTri = [
+    { x: tri[0].x+4, y: tri[0].y-2 },
+    { x: tri[1].x, y: tri[1].y+6 },
+    { x: tri[2].x-4, y: tri[2].y-2 }
+  ];
+  return corners.some(([cx,cy]) => pointInTriangle(cx, cy, shrinkTri));
+}
+
+// ── particles ─────────────────────────────────────────────
+function spawnDeathParticles(x, y) {
+  for (let i = 0; i < 18; i++) {
+    const angle = (Math.random() * Math.PI * 2);
+    const speed = 2 + Math.random() * 5;
+    particles.push({
+      x, y, vx: Math.cos(angle)*speed, vy: Math.sin(angle)*speed - 3,
+      life: 1, decay: 0.03 + Math.random()*0.03,
+      size: 4 + Math.random()*6,
+      color: ['#00cfff','#0077cc','#ffffff'][Math.floor(Math.random()*3)]
+    });
+  }
+}
+
+function spawnJumpParticles(x, y) {
+  for (let i = 0; i < 5; i++) {
+    particles.push({
+      x: x + Math.random()*TILE, y: y + TILE,
+      vx: (Math.random()-0.5)*2, vy: 1 + Math.random()*2,
+      life: 1, decay: 0.08, size: 3+Math.random()*3, color:'#00cfff'
+    });
+  }
+}
+
+// ── update ─────────────────────────────────────────────────
+function update() {
+  if (gameState !== 'playing') return;
+
+  // move camera
+  camera.x += SPEED;
+  bgOffset = (bgOffset + SPEED * 0.3) % W;
+
+  const worldX = player.x + camera.x;
+  const pct = Math.min(100, Math.floor((worldX / LEVEL_LENGTH) * 100));
+  document.getElementById('percent').textContent = pct + '%';
+  document.getElementById('attempts').textContent = 'Attempt ' + attempts;
+
+  // check win
+  if (worldX >= LEVEL_LENGTH) {
+    gameState = 'win';
+    bestPercent = 100;
+    showOverlay(false, true);
+    return;
+  }
+
+  // gravity
+  player.vy += GRAVITY;
+  player.y += player.vy;
+
+  // ground collision
+  if (player.y >= GROUND_Y - TILE) {
+    player.y = GROUND_Y - TILE;
+    player.vy = 0;
+    player.onGround = true;
+  } else {
+    player.onGround = false;
+  }
+
+  // block collisions
+  for (const item of levelItems) {
+    if (item.type !== 'block') continue;
+    const bx = item.x - camera.x;
+    if (bx > player.x + TILE + 10 || bx < player.x - TILE - 10) continue;
+    const br = { x: bx, y: item.y, w: TILE, h: TILE };
+    const pr = playerRect();
+    if (rectsOverlap(pr, br)) {
+      const overlapLeft = (pr.x + pr.w) - br.x;
+      const overlapRight = (br.x + br.w) - pr.x;
+      const overlapTop = (pr.y + pr.h) - br.y;
+      const overlapBottom = (br.y + br.h) - pr.y;
+      const minH = Math.min(overlapLeft, overlapRight);
+      const minV = Math.min(overlapTop, overlapBottom);
+      if (minV < minH) {
+        if (overlapTop < overlapBottom) {
+          // landed on top
+          player.y = br.y - TILE;
+          player.vy = 0;
+          player.onGround = true;
+        } else {
+          // hit from below
+          player.vy = Math.abs(player.vy);
+          die();
+        }
+      } else {
+        // side collision = death
+        die();
+      }
+    }
+  }
+
+  // jump
+  if (jumpQueued && player.onGround) {
+    player.vy = JUMP_FORCE;
+    player.onGround = false;
+    spawnJumpParticles(player.x - camera.x, player.y);
+  }
+  jumpQueued = false;
+
+  // rotation
+  if (!player.onGround) {
+    player.rotation += 7;
+  } else {
+    player.rotation = Math.round(player.rotation / 90) * 90;
+  }
+
+  // trail
+  player.trail.push({ x: player.x - camera.x + TILE/2, y: player.y + TILE/2, life: 1 });
+  if (player.trail.length > 12) player.trail.shift();
+  player.trail.forEach(t => t.life -= 0.08);
+
+  // spike / orb collisions
+  for (const item of levelItems) {
+    const bx = item.x - camera.x;
+    if (bx > player.x + TILE*2 || bx < player.x - TILE*2) continue;
+
+    if (item.type === 'spike' && !item.hit) {
+      if (spikeCollide(item)) { die(); break; }
+    }
+    if (item.type === 'orb' && !item.used) {
+      const pr = playerRect();
+      const or = { x: bx - 16, y: item.y - 16, w: 32, h: 32 };
+      if (rectsOverlap(pr, or) && (jumpQueued || jumpHeld)) {
+        player.vy = JUMP_FORCE * 1.1;
+        item.used = true;
+        // yellow flash
+        particles.push({ x: bx, y: item.y, vx:0, vy:0, life:1, decay:0.05, size:24, color:'#ffdd00' });
+      }
+    }
+  }
+
+  // update particles
+  particles = particles.filter(p => p.life > 0);
+  particles.forEach(p => {
+    p.x += p.vx; p.y += p.vy;
+    p.vy += 0.2;
+    p.life -= p.decay;
+  });
+
+  // fell off bottom
+  if (player.y > H + 50) die();
+}
+
+function die() {
+  if (gameState !== 'playing') return;
+  gameState = 'dead';
+  spawnDeathParticles(player.x - camera.x + TILE/2, player.y + TILE/2);
+  const worldX = player.x + camera.x;
+  const pct = Math.min(100, Math.floor((worldX / LEVEL_LENGTH) * 100));
+  if (!bestPercent || pct > bestPercent) bestPercent = pct;
+  // delay to show particles then show menu
+  setTimeout(() => showOverlay(true, false), 800);
+}
+
+function showOverlay(dead, win) {
+  document.getElementById('overlay').style.display = 'flex';
+  document.getElementById('deathMsg').style.display = dead ? 'block' : 'none';
+  document.getElementById('completeMsg').style.display = win ? 'block' : 'none';
+  document.getElementById('startBtn').textContent = (dead||win) ? 'Retry' : 'Play';
+  if (bestPercent) {
+    document.getElementById('bestPercent').textContent = 'Best: ' + bestPercent + '%';
+  }
+  if (win) attempts = 0;
+}
+
+// ── draw helpers ───────────────────────────────────────────
+function drawBackground() {
+  const grad = ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0, BG_TOP);
+  grad.addColorStop(1, BG_BOT);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0,0,W,H);
+
+  // scrolling bg lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 20; i++) {
+    const x = ((i * 80 - bgOffset) % (W + 80));
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x - 60, H); ctx.stroke();
+  }
+
+  // stars
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  for (let i = 0; i < 40; i++) {
+    const sx = ((i * 137 + bgOffset*0.1) % W);
+    const sy = (i * 73) % (GROUND_Y - 20);
+    const ss = 0.5 + (i % 3) * 0.5;
+    ctx.fillRect(sx, sy, ss, ss);
+  }
+}
+
+function drawGround() {
+  ctx.fillStyle = GROUND_COLOR;
+  ctx.fillRect(0, GROUND_Y, W, H - GROUND_Y);
+  // grid lines
+  ctx.strokeStyle = GROUND_LINE;
+  ctx.lineWidth = 1;
+  const offset = camera.x % TILE;
+  for (let x = -offset; x < W; x += TILE) {
+    ctx.beginPath(); ctx.moveTo(x, GROUND_Y); ctx.lineTo(x, H); ctx.stroke();
+  }
+  ctx.beginPath(); ctx.moveTo(0, GROUND_Y); ctx.lineTo(W, GROUND_Y); ctx.stroke();
+  // horizontal ground lines
+  for (let y = GROUND_Y + TILE/2; y < H; y += TILE/2) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+  }
+}
+
+function drawBlock(x, y) {
+  ctx.fillStyle = BLOCK_COLOR;
+  ctx.fillRect(x, y, TILE, TILE);
+  ctx.strokeStyle = BLOCK_DETAIL;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x+1, y+1, TILE-2, TILE-2);
+  // inner X
+  ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(x+4, y+4); ctx.lineTo(x+TILE-4, y+TILE-4); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x+TILE-4, y+4); ctx.lineTo(x+4, y+TILE-4); ctx.stroke();
+}
+
+function drawSpike(x, y) {
+  ctx.fillStyle = SPIKE_COLOR;
+  ctx.beginPath();
+  ctx.moveTo(x, y + TILE);
+  ctx.lineTo(x + TILE/2, y);
+  ctx.lineTo(x + TILE, y + TILE);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = '#ff8888';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+function drawOrb(x, y, used) {
+  if (used) return;
+  ctx.save();
+  ctx.shadowBlur = 16;
+  ctx.shadowColor = ORB_COLOR;
+  ctx.strokeStyle = ORB_COLOR;
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(x, y, 12, 0, Math.PI*2);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255,220,0,0.3)';
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawPlayer() {
+  const px = player.x - camera.x + TILE/2;
+  const py = player.y + TILE/2;
+
+  // trail
+  player.trail.forEach((t, i) => {
+    if (t.life <= 0) return;
+    ctx.globalAlpha = t.life * 0.4;
+    ctx.fillStyle = PLAYER_COLOR;
+    const s = TILE * 0.5 * t.life;
+    ctx.fillRect(t.x - s/2, t.y - s/2, s, s);
+    ctx.globalAlpha = 1;
+  });
+
+  ctx.save();
+  ctx.translate(px, py);
+  ctx.rotate(player.rotation * Math.PI / 180);
+
+  // outer square
+  ctx.shadowBlur = 12;
+  ctx.shadowColor = PLAYER_COLOR;
+  ctx.fillStyle = PLAYER_COLOR;
+  ctx.fillRect(-TILE/2, -TILE/2, TILE, TILE);
+
+  // inner square
+  ctx.fillStyle = PLAYER_INNER;
+  ctx.fillRect(-TILE/2+6, -TILE/2+6, TILE-12, TILE-12);
+
+  // highlight
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.fillRect(-TILE/2+6, -TILE/2+6, TILE/2-6, TILE/4-3);
+
+  ctx.restore();
+}
+
+function drawParticles() {
+  particles.forEach(p => {
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size);
+    ctx.globalAlpha = 1;
+  });
+}
+
+function drawItems() {
+  for (const item of levelItems) {
+    const bx = item.x - camera.x;
+    if (bx > W + TILE || bx < -TILE) continue;
+    if (item.type === 'block') drawBlock(bx, item.y);
+    else if (item.type === 'spike') drawSpike(bx, item.y);
+    else if (item.type === 'orb') drawOrb(bx, item.y, item.used);
+  }
+}
+
+// ── progress bar ────────────────────────────────────────────
+function drawProgressBar() {
+  const bw = W - 40, bh = 6, bx = 20, by = H - 18;
+  ctx.fillStyle = 'rgba(255,255,255,0.1)';
+  ctx.fillRect(bx, by, bw, bh);
+  const worldX = player.x + camera.x;
+  const pct = Math.min(1, worldX / LEVEL_LENGTH);
+  ctx.fillStyle = PLAYER_COLOR;
+  ctx.fillRect(bx, by, bw * pct, bh);
+}
+
+// ── main loop ──────────────────────────────────────────────
+function draw() {
+  drawBackground();
+  drawGround();
+  drawItems();
+  drawParticles();
+  if (gameState === 'playing' || gameState === 'dead') drawPlayer();
+  drawProgressBar();
+}
+
+let lastTime = 0;
+function loop(ts) {
+  const dt = ts - lastTime;
+  lastTime = ts;
+  // fixed 60fps step
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// init
+attempts = 0;
+bestPercent = 0;
+initGame();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
