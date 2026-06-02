@@ -819,10 +819,10 @@ function isAccelZone(y) {
   return y > canvas.height * (1 - BOTTOM_ZONE_FRAC);
 }
 
-canvas.addEventListener('touchstart', onTouchStart, { passive: false });
-canvas.addEventListener('touchmove',  onTouchMove,  { passive: false });
-canvas.addEventListener('touchend',   onTouchEnd,   { passive: false });
-canvas.addEventListener('touchcancel',onTouchEnd,   { passive: false });
+document.addEventListener('touchstart', onTouchStart, { passive: false });
+document.addEventListener('touchmove',  onTouchMove,  { passive: false });
+document.addEventListener('touchend',   onTouchEnd,   { passive: false });
+document.addEventListener('touchcancel',onTouchEnd,   { passive: false });
 
 // Horn button
 hornBtn.addEventListener('touchstart', (e) => {
@@ -877,8 +877,9 @@ function onTouchEnd(e) {
 // Mouse fallback for desktop testing
 let mouseDown = false;
 let mouseStartX = 0;
-canvas.addEventListener('mousedown', (e) => {
+document.addEventListener('mousedown', (e) => {
   if (state !== 'playing') return;
+  if (e.target === hornBtn || hornBtn.contains(e.target)) return;
   mouseDown = true;
   touch.active = true;
   touch.id = 'mouse';
@@ -887,17 +888,12 @@ canvas.addEventListener('mousedown', (e) => {
   touch.currentX = e.clientX;
   touch.currentY = e.clientY;
 });
-canvas.addEventListener('mousemove', (e) => {
+document.addEventListener('mousemove', (e) => {
   if (!mouseDown || state !== 'playing') return;
   touch.currentX = e.clientX;
   touch.currentY = e.clientY;
 });
-canvas.addEventListener('mouseup', () => {
-  mouseDown = false;
-  touch.active = false;
-  touch.id = null;
-});
-canvas.addEventListener('mouseleave', () => {
+document.addEventListener('mouseup', () => {
   mouseDown = false;
   touch.active = false;
   touch.id = null;
